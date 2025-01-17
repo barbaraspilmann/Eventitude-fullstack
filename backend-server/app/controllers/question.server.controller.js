@@ -1,46 +1,99 @@
 const Joi = require('joi');
 const questionModel = require('../models/question.model');
 
-// Validation schemas for questions
-const createQuestionSchema = Joi.object({
-    question: Joi.string().min(10).required(),
-    asked_by: Joi.number().integer().required(),
-    event_id: Joi.number().integer().required()
-});
-
 // Create a new question
-const create_question = (req, res) => {
-    const { error } = createQuestionSchema.validate(req.body);
-    if (error) return res.status(400).json({ error: error.details[0].message });
+const create_question = async (req, res) => {
+  try {
+    const { question } = req.body;
+    const { event_id } = req.params;
 
-    questionModel.addNewQuestion(req.body, (err, questionId) => {
-        if (err) return res.status(500).json({ error: 'Error to create Question' });
-        res.status(201).json({ message: 'Question created sucessfully', questionId });
-    });
+    // Ensure the user is authenticated
+    if (!req.userId) {
+      return res.status(401).json({ error_message: 'Unauthorized' });
+    }
+
+    // Validate question
+    if (!question || typeof question !== 'string' || question.trim().length === 0) {
+      return res.status(400).json({ error_message: 'Question is required and cannot be empty' });
+    }
+
+    if (Object.keys(req.body).length > 1) {
+      return res.status(400).json({ error_message: 'Invalid fields in request' });
+    }
+
+    // Check if user is registered for the event
+    const isRegistered = await questionModel.isUserRegisteredForEvent(req.userId, event_id);
+    if (!isRegistered) {
+      return res.status(403).json({ error_message: 'You must be registered to ask questions' });
+    }
+
+    // Prevent event creator from asking questions
+    const isCreator = await questionModel.isEventCreator(req.userId, event_id);
+    if (isCreator) {
+      return res.status(403).json({ error_message: 'Event creators cannot ask questions' });
+    }
+
+    // Add the question
+    const questionId = await questionModel.addNewQuestion(event_id, req.userId, question);
+    res.status(201).json({ question_id: questionId });
+  } catch (err) {
+    console.error('Error in create_question:', err);
+    res.status(500).json({ error_message: 'Internal server error' });
+  }
 };
 
 // Get question by ID
-const get_question = (req, res) => {
-    const questionId = req.params.question_id;
-    questionModel.findQuestionById(questionId, (err, question) => {
-        if (err) return res.status(500).json({ error: 'Error to search Question' });
-        if (!question) return res.status(404).json({ error: 'Question not Found' });
-        res.status(200).json(question);
-    });
+const get_question = async (req, res) => {
+  try {
+    const { question_id } = req.params;
+
+    const question = await questionModel.findQuestionById(question_id);
+    if (!question) {
+      return res.status(404).json({ error_message: 'Question not found' });
+    }
+
+    res.status(200).json(question);
+  } catch (err) {
+    console.error('Error in get_question:', err);
+    res.status(500).json({ error_message: 'Internal server error' });
+  }
 };
 
 // Delete a question by ID
-const delete_question = (req, res) => {
-    const questionId = req.params.question_id;
-    questionModel.deleteQuestionById(questionId, (err) => {
-        if (err) return res.status(500).json({ error: 'Error to delete Question' });
-        res.status(200).json({ message: 'Question Deleted' });
-    });
+const delete_question = async (req, res) => {
+  try {
+    const { question_id } = req.params;
+
+    // Ensure the user is authenticated
+    if (!req.userId) {
+      return res.status(401).json({ error_message: 'Unauthorized' });
+    }
+
+    // Find the question
+    const question = await questionModel.findQuestionById(question_id);
+    if (!question) {
+      return res.status(404).json({ error_message: 'Question not found' });
+    }
+
+    // Check if the user is the author or the event creator
+    const isAuthor = question.asked_by === req.userId;
+    const isEventCreator = await questionModel.isEventCreator(req.userId, question.event_id);
+
+    if (!isAuthor && !isEventCreator) {
+      return res.status(403).json({ error_message: 'You do not have permission to delete this question' });
+    }
+
+    // Delete the question
+    await questionModel.deleteQuestionById(question_id);
+    res.status(200).json({ message: 'Question deleted successfully' });
+  } catch (err) {
+    console.error('Error in delete_question:', err);
+    res.status(500).json({ error_message: 'Internal server error' });
+  }
 };
 
 module.exports = {
-    create_question,
-    get_question,
-    delete_question
+  create_question,
+  get_question,
+  delete_question,
 };
-

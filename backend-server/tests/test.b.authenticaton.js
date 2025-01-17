@@ -155,7 +155,7 @@ describe('Test user login/logout', () => {
     it("Should return 401 status code for logging out user not logged in", () => {
         return chai.request(SERVER_URL)
             .post("/logout")
-            .set("X-Authorization", "hello")
+            .set("x-authorization", "hello")
             .then((res) => {
                expect(res).to.have.status(401)
             })
@@ -167,7 +167,7 @@ describe('Test user login/logout', () => {
     it("Should return 200 status code for logging out user who is logged in", () => {
         return chai.request(SERVER_URL)
             .post("/logout")
-            .set("X-Authorization", SESSION_TOKEN)
+            .set("x-authorization", SESSION_TOKEN)
             .then((res) => {
                 expect(res).to.have.status(200)
             })
