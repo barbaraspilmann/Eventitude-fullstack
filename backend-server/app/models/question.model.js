@@ -11,6 +11,22 @@ const addNewQuestion = (eventId, userId, question) => {
   });
 };
 
+// Add a question for an event
+const addQuestion = (eventId, userId, question) => {
+  return new Promise((resolve, reject) => {
+    const sql = `
+      INSERT INTO questions (event_id, asked_by, question, votes)
+      VALUES (?, ?, ?, 0)
+    `;
+    db.run(sql, [eventId, userId, question], function (err) {
+      if (err) {
+        return reject(err);
+      }
+      resolve(this.lastID); // Return the ID of the newly inserted question
+    });
+  });
+};
+
 // Find question by ID
 const findQuestionById = (questionId) => {
   return new Promise((resolve, reject) => {
@@ -83,6 +99,7 @@ const getQuestionsForEvent = (eventId) => {
 };
 
 module.exports = {
+  addQuestion,
   addNewQuestion,
   findQuestionById,
   deleteQuestionById,

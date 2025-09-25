@@ -1,8 +1,6 @@
 const events = require('../controllers/event.server.controller');
 const authenticate = require('../lib/authentication');
 
-
-
 module.exports = (app) => {
   // Routes for specific event by ID
   app.route('/event/:event_id')
@@ -10,6 +8,7 @@ module.exports = (app) => {
 
   // Routes for event collection
   app.route('/events')
+    .get(events.searchEvents) // Fetch or search events (changed from `/events/search`)
     .post(authenticate, events.addEvent); // Add a new event
 
   // Routes for actions on a specific event
@@ -22,8 +21,8 @@ module.exports = (app) => {
   app.route('/events/:eventId/question')
     .post(authenticate, events.askQuestion); // Ask a question for an event
 
-  // Event search
-  app.route('/events/search')
-    .get(events.searchEvents); // Search for events
+  app.route('/events/:eventId')
+  .patch(authenticate, events.updateEvent) // Update an event
+  
 };
 

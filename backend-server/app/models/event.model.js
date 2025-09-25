@@ -1,5 +1,7 @@
 const db = require('../database');
+const sqlite3 = require('sqlite3').verbose();
 
+// Find event by name
 async function findEventByName(name, creatorId) {
   return new Promise((resolve, reject) => {
     const query = `SELECT * FROM events WHERE name = ? AND creator_id = ?`;
@@ -11,37 +13,21 @@ async function findEventByName(name, creatorId) {
     });
   });
 }
+
 // Find event by ID
 const findEventById = (eventId) => {
   return new Promise((resolve, reject) => {
     const sql = `
-      SELECT e.event_id, e.name, e.description, e.location, e.start, 
+      SELECT e.event_id, e.name, e.description, e.location, e.start_date, 
              e.close_registration, e.max_attendees, 
-             u.user_id AS creator_id, u.first_name, u.last_name, u.email
+             u.user_id AS creator_id, u.first_name, u.last_name
       FROM events e
       JOIN users u ON e.creator_id = u.user_id
-      WHERE e.event_id = ?`;
+      WHERE e.event_id = ?
+    `;
     db.get(sql, [eventId], (err, row) => {
       if (err) return reject(err);
-      if (!row) return resolve(null);
-
-      const event = {
-        event_id: row.event_id,
-        name: row.name,
-        description: row.description,
-        location: row.location,
-        start: row.start,
-        close_registration: row.close_registration,
-        max_attendees: row.max_attendees,
-        creator: {
-          creator_id: row.creator_id,
-          first_name: row.first_name,
-          last_name: row.last_name,
-          email: row.email,
-        },
-      };
-
-      resolve(event);
+      resolve(row);
     });
   });
 };
@@ -141,16 +127,24 @@ const searchEvents = (query, category) => {
   });
 };
 
+
+// Add a question for an event
 const addQuestion = (eventId, userId, question) => {
   return new Promise((resolve, reject) => {
-    const sql = `INSERT INTO questions (event_id, user_id, question) VALUES (?, ?, ?)`;
+    const sql = `
+      INSERT INTO questions (event_id, asked_by, question, votes)
+      VALUES (?, ?, ?, 0)
+    `;
     db.run(sql, [eventId, userId, question], function (err) {
-      if (err) reject(err);
+      if (err) {
+        return reject(err);
+      }
       resolve(this.lastID); // Return the ID of the newly inserted question
     });
   });
 };
 
+// Get the number of attendees for an event
 const getNumberOfAttendees = (eventId) => {
   return new Promise((resolve, reject) => {
     const sql = `SELECT COUNT(*) AS count FROM attendees WHERE event_id = ?`;
@@ -161,16 +155,40 @@ const getNumberOfAttendees = (eventId) => {
   });
 };
 
+// Get attendees for an event
 const getAttendeesForEvent = (eventId) => {
   return new Promise((resolve, reject) => {
     const sql = `
       SELECT u.user_id, u.first_name, u.last_name, u.email
       FROM attendees a
       JOIN users u ON a.user_id = u.user_id
-      WHERE a.event_id = ?`;
+      WHERE a.event_id = ?
+    `;
     db.all(sql, [eventId], (err, rows) => {
       if (err) return reject(err);
       resolve(rows);
+    });
+  });
+};
+
+// Update an event
+const updateEvent = (eventId, updatedFields) => {
+  return new Promise((resolve, reject) => {
+    const fields = Object.keys(updatedFields).map(field => `${field} = ?`).join(', ');
+    const values = Object.values(updatedFields);
+    values.push(eventId);
+
+    const sql = `
+      UPDATE events
+      SET ${fields}
+      WHERE event_id = ?
+    `;
+
+    db.run(sql, values, function (err) {
+      if (err) {
+        return reject(err);
+      }
+      resolve(this.changes > 0); // Return true if rows were updated
     });
   });
 };
@@ -186,5 +204,6 @@ module.exports = {
   addQuestion,
   getNumberOfAttendees,
   getAttendeesForEvent,
-  findEventByName
+  findEventByName,
+  updateEvent
 };

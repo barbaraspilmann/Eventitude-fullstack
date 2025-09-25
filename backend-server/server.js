@@ -7,6 +7,7 @@ const rateLimit = require('express-rate-limit');
 const fs = require('fs');
 const path = require('path');
 
+
 // Initialize the Express app
 const app = express();
 
@@ -35,6 +36,7 @@ app.get('/', (req, res) => res.json({ status: 'Alive' }));
 require('./app/routes/user.server.routes')(app);
 require('./app/routes/event.server.routes')(app);
 require('./app/routes/question.server.routes')(app);
+require('./app/routes/event.server.routes')(app);
 
 // Error handling middleware
 app.use((err, req, res, next) => {

@@ -16,7 +16,7 @@
 </template>
 
 <script>
-import { eventService } from "../../services/events.service";
+import { eventsService } from "../../services/events.service";
 
 export default {
   name: "Home",

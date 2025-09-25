@@ -1,25 +1,33 @@
+const addEvent = (eventData) => {
+  const token = localStorage.getItem('session_token');
+  return fetch('http://localhost:3333/events', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Authorization': token,
+    },
+    body: JSON.stringify(eventData),
+  }).then((response) => {
+    if (!response.ok) {
+      return response.json().then((error) => {
+        throw new Error(error.error_message || 'An error occurred');
+      });
+    }
+    return response.json();
+  });
+};
+
 const getEvents = () => {
-  return fetch("http://localhost:3333/events") // Replace with your actual API URL
+  return fetch('http://localhost:3333/events')
     .then((response) => {
-      console.log("Fetch Response:", response); // Log the response
-      if (response.status === 200) {
-        return response.json();
-      } else {
-        throw `Error: ${response.status} - ${response.statusText}`;
-      }
-    })
-    .then((resJson) => {
-      console.log("Fetched Data:", resJson); // Log the JSON response
-      return resJson;
+      if (response.ok) return response.json();
+      throw new Error(`${response.status} - ${response.statusText}`);
     })
     .catch((error) => {
-      console.error("Error fetching events:", error);
+      console.error('Error fetching events:', error);
       return Promise.reject(error);
     });
 };
 
-// Correctly export the service
-export const eventService = {
-  getEvents,
-};
+export const eventsService = { addEvent, getEvents };
 

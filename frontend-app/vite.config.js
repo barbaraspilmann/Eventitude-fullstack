@@ -3,7 +3,13 @@ import vue from '@vitejs/plugin-vue';
 
 export default defineConfig({
   plugins: [vue()],
-  define: {
-    __VUE_PROD_DEVTOOLS__: false, // Disable Vue DevTools in production
+  server: {
+    proxy: {
+      '/api': {
+        target: 'http://localhost:3000', // Your backend API URL
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/api/, ''),
+      },
+    },
   },
 });

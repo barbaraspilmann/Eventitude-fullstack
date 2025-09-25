@@ -3,6 +3,15 @@ const eventModel = require('../models/event.model');
 const questionModel = require('../models/question.model');
 
 
+// Custom validation to support both ISO 8601 and timestamp formats
+const customDateValidation = (value, helpers) => {
+  const date = isNaN(value) ? new Date(value) : new Date(parseInt(value));
+  if (isNaN(date.getTime())) {
+    return helpers.error('any.invalid', { value });
+  }
+  return date.toISOString(); // Normalize to ISO format
+};
+
 // Validation schema for incoming event data
 const addEventSchema = Joi.object({
   name: Joi.string().required(),
@@ -13,15 +22,6 @@ const addEventSchema = Joi.object({
   max_attendees: Joi.number().integer().positive().required(), // Must be a positive integer
 });
 
-// Validation schema for updating an event
-const updateEventSchema = Joi.object({
-  name: Joi.string(),
-  description: Joi.string(),
-  location: Joi.string(),
-  start_date: Joi.date().iso().greater('now'), // Start date must be in the future
-  close_registration: Joi.date().iso().less(Joi.ref('start_date')), // Close registration must be before the start date
-  max_attendees: Joi.number().integer().positive(), // Must be a positive integer
-}).unknown(true); // Allow extra fields
 
 let Filter;
 (async () => {
@@ -37,7 +37,6 @@ async function doesEventExist(name, creatorId) {
 
 const addEvent = async (req, res) => {
   try {
-    // Ensure req.body is always an array
     const events = Array.isArray(req.body) ? req.body : [req.body];
 
     // Check if the user is authenticated
@@ -45,29 +44,34 @@ const addEvent = async (req, res) => {
       return res.status(401).json({ error_message: 'Unauthorized. Please log in.' });
     }
 
-    // Validate and process each event
     for (const event of events) {
       const { name, description, location, start, close_registration, max_attendees } = event;
 
-      // Check for required fields
+      // Ensure all fields are provided
       if (!name || !description || !location || !start || !close_registration || !max_attendees) {
         return res.status(400).json({ error_message: 'All fields are required.' });
       }
 
-      // Validate start and close_registration timestamps
-      const startTime = new Date(parseInt(start));
-      const closeRegTime = new Date(parseInt(close_registration));
+      // Validate start and close_registration dates
+      const parsedStart = isNaN(start) ? new Date(start) : new Date(parseInt(start));
+      const parsedCloseReg = isNaN(close_registration) ? new Date(close_registration) : new Date(parseInt(close_registration));
 
-      if (isNaN(startTime.getTime()) || startTime <= Date.now()) {
+      if (isNaN(parsedStart.getTime()) || parsedStart <= Date.now()) {
         return res.status(400).json({ error_message: 'Invalid or past start time.' });
       }
-      if (isNaN(closeRegTime.getTime()) || closeRegTime >= startTime || close_registration === "-1") {
+      if (isNaN(parsedCloseReg.getTime()) || parsedCloseReg >= parsedStart) {
         return res.status(400).json({ error_message: 'Invalid registration close time.' });
       }
 
       // Validate max_attendees
       if (!Number.isInteger(max_attendees) || max_attendees <= 0) {
         return res.status(400).json({ error_message: 'max_attendees must be a positive integer.' });
+      }
+
+      // Check for profanity in event fields
+      const filter = new Filter();
+      if (filter.isProfane(name) || filter.isProfane(description)) {
+        return res.status(400).json({ error_message: 'Profanity is not allowed in event name or description.' });
       }
 
       // Check if the event already exists for the user
@@ -81,8 +85,8 @@ const addEvent = async (req, res) => {
         name,
         description,
         location,
-        start: startTime.toISOString(),
-        close_registration: closeRegTime.toISOString(),
+        start: parsedStart.toISOString(),
+        close_registration: parsedCloseReg.toISOString(),
         max_attendees,
         creator_id: req.userId,
       });
@@ -90,7 +94,7 @@ const addEvent = async (req, res) => {
 
     res.status(201).json({ message: 'Events added successfully' });
   } catch (err) {
-    console.error('Error in addEvents:', err);
+    console.error('Error in addEvent:', err);
     res.status(500).json({ error_message: 'Internal server error' });
   }
 };
@@ -108,6 +112,18 @@ const getEvent = async (req, res) => {
     res.status(500).json({ error_message: 'Internal server error' });
   }
 };
+
+
+// Validation schema for updating an event
+const updateEventSchema = Joi.object({
+  name: Joi.string(),
+  description: Joi.string(),
+  location: Joi.string(),
+  start_date: Joi.date().iso().greater('now'), // Start date must be in the future
+  close_registration: Joi.date().iso().less(Joi.ref('start_date')), // Close registration must be before the start date
+  max_attendees: Joi.number().integer().positive(), // Must be a positive integer
+}).unknown(true); // Allow extra fields
+
 
 // Update an existing event (PATCH /events/:eventId)
 const updateEvent = async (req, res) => {
@@ -219,58 +235,99 @@ const registerForEvent = async (req, res) => {
 };
 
 
+
 // Ask a question about an event (POST /events/:eventId/question)
 const askQuestion = async (req, res) => {
   try {
     const { eventId } = req.params;
     const { question } = req.body;
 
+    console.log('askQuestion called with:', { eventId, userId: req.userId, question });
+
     // Ensure the user is authenticated
     if (!req.userId) {
+      console.error('User not authenticated');
       return res.status(401).json({ error_message: 'Unauthorized' });
     }
 
     // Check if the event exists
-    const event = await eventModel.findEventById(eventId);
+    let event;
+    try {
+      event = await eventModel.findEventById(eventId);
+      console.log('Event found:', event);
+    } catch (err) {
+      console.error('Error fetching event:', err);
+      return res.status(500).json({ error_message: 'Internal server error while fetching event' });
+    }
+
     if (!event) {
+      console.error('Event not found for ID:', eventId);
       return res.status(404).json({ error_message: 'Event not found' });
     }
 
     // Prevent the creator from asking a question
     if (event.creator_id === req.userId) {
+      console.error('User is the creator of the event:', req.userId);
       return res.status(403).json({ error_message: 'Event creators cannot ask questions on their events' });
     }
 
     // Check if the user is registered for the event
-    const isRegistered = await eventModel.isUserRegisteredForEvent(req.userId, eventId);
+    let isRegistered;
+    try {
+      isRegistered = await eventModel.isUserRegisteredForEvent(req.userId, eventId);
+      console.log('User registration status:', isRegistered);
+    } catch (err) {
+      console.error('Error checking user registration:', err);
+      return res.status(500).json({ error_message: 'Internal server error while checking registration' });
+    }
+
     if (!isRegistered) {
+      console.error('User is not registered for the event:', req.userId);
       return res.status(403).json({ error_message: 'You must be registered to ask questions' });
     }
 
     // Validate the question content
     if (!question || question.trim() === '') {
+      console.error('Question is empty or invalid');
       return res.status(400).json({ error_message: 'Question cannot be empty' });
     }
 
     // Check for extra fields
     if (Object.keys(req.body).length > 1) {
+      console.error('Request contains invalid fields:', req.body);
       return res.status(400).json({ error_message: 'Invalid fields in request' });
     }
 
     // Add the question to the database
-    const questionId = await eventModel.addQuestion(eventId, req.userId, question);
+    let questionId;
+    try {
+      questionId = await questionModel.addQuestion(eventId, req.userId, question);
+      console.log('Question added with ID:', questionId);
+    } catch (err) {
+      console.error('Error adding question to the database:', err);
+      return res.status(500).json({ error_message: 'Internal server error while adding question' });
+    }
+
     res.status(201).json({ question_id: questionId });
   } catch (err) {
-    console.error('Error in askQuestion:', err);
+    console.error('Unexpected error in askQuestion:', err);
     res.status(500).json({ error_message: 'Internal server error' });
   }
 };
 
 // Search events (GET /search)
+
 const searchEvents = async (req, res) => {
   try {
     const { q, category } = req.query;
-    const events = await eventModel.searchEvents(q, category);
+
+    // Call the model's searchEvents method
+    const events = await eventModel.searchEvents(q || '', category);
+
+    if (!events || events.length === 0) {
+      return res.status(404).json({ error_message: 'No events found' });
+    }
+
     res.status(200).json(events);
   } catch (err) {
     console.error('Error in searchEvents:', err);
@@ -278,41 +335,13 @@ const searchEvents = async (req, res) => {
   }
 };
 
-// This function should return varying levels of detail based on whether the 
-// user is authenticated, and if authenticated, whether the user is the event creator or a regular attendee
+// Fetch an event by ID (GET /events/:eventId)
 const getEventById = async (req, res) => {
   try {
-    const { event_id } = req.params;
-
-    // Fetch event details
-    const event = await eventModel.findEventById(event_id);
+    const event = await eventModel.findEventById(req.params.eventId);
     if (!event) {
       return res.status(404).json({ error_message: 'Event not found' });
     }
-
-    // Fetch the number of attendees
-    const numberAttending = await eventModel.getNumberOfAttendees(event_id);
-    event.number_attending = numberAttending;
-
-    // Fetch the list of questions for the event, sorted by votes
-    const questions = await questionModel.getQuestionsForEvent(event_id);
-    event.questions = questions;
-
-    // Handle authentication
-    const userId = req.userId; // Provided by middleware if user is authenticated
-    if (!userId) {
-      // If not authenticated, do not return attendees
-      delete event.attendees;
-      return res.status(200).json(event);
-    }
-
-    // Fetch attendee list if the user is the creator
-    if (userId === event.creator_id) {
-      const attendees = await eventModel.getAttendeesForEvent(event_id);
-      event.attendees = attendees;
-    }
-
-    // Return event details
     res.status(200).json(event);
   } catch (err) {
     console.error('Error in getEventById:', err);
